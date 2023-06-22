@@ -59,6 +59,7 @@ zks
 
 What does the machine NOT support?
 ```
+$ cat run.log | egrep 'sigill$'|awk '{print $1}' | sort | uniq
 b
 d_zfa
 d_zfh
@@ -111,7 +112,7 @@ replaces the non-hardcoded parts with '1'.
 Bugs
 ----
 
-Some branching instructions will be reported as "sigill", due to the
-"all-ones" filler.
+Some branching instructions will be reported as "sigill"; They work,
+but branch to an illegal instruction.
 
 Probably more. ;-)
