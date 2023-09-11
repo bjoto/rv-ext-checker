@@ -20,8 +20,8 @@ def parse_input_options():
         "--file", "-f", type=str, required=True, help="input file", metavar="<input file>"
     )
     parser.add_argument(
-        "--output", "-o", type=str, required=True, help="output directory",
-        metavar="<output directory>"
+        "--output", "-o", type=str, required=True, help="output file",
+        metavar="<output file>"
     )
 
     args = parser.parse_args()
@@ -30,24 +30,24 @@ def parse_input_options():
 def main():
     args = parse_input_options()
     input_file = open(args.file, "r")
-    os.mkdir(args.output)
 
     y = yaml.safe_load(input_file)
 
-    cprog = jinja2.Template(
-    """
+    top =  """
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
 
+static const char *curr;
+
 static void sighandler(int sig)
 {
         if (sig == SIGILL) {
-                puts("{{ ext }} {{ insn }} sigill");
+                printf("%s sigill", curr);
                 exit(1);
         }
 
-        printf("{{ ext }} {{ insn }} sig:%d ok\\n", sig);
+        printf("%s sig:%d ok\\n", curr, sig);
         exit(0);
 }
 
@@ -59,7 +59,11 @@ int main()
                 exit(2);
         if (signal(SIGBUS, sighandler) == SIG_ERR)
                 exit(2);
+    """
 
+    cprog = jinja2.Template(
+    """
+        curr = "{{ ext }} {{ insn }}";
         asm volatile (
     {% if comp == "c" %}
                 ".2byte {{ full_insn }}\\n\\t"
@@ -68,36 +72,41 @@ int main()
     {% endif %}
                 : : : "memory");
 
-        puts("{{ ext }} {{ insn }} ok");
-        exit(0);
-}
+        printf("%s ok\\n", curr);
+
     """)
 
-    for d in y:
-        # skip rv32 and system insns
-        if "rv32_" in y[d]['extension'][0] or "rv_s" in y[d]['extension'][0] \
-           or "rv_zicsr" in y[d]['extension'][0]:
-            continue
+    bottom = """
+    }
+    """
 
-        ext = y[d]['extension'][0] # XXX
-        ext = re.sub(r'^rv64_', '', ext)
-        ext = re.sub(r'^rv_', '', ext)
-        insn = d.replace("_", ".")
+    with open(f"{args.output}", "w") as f:
+        f.write(top)
+        for d in y:
+            # skip rv32 and system insns
+            if "rv32_" in y[d]['extension'][0] or "rv_s" in y[d]['extension'][0] \
+               or "rv_zicsr" in y[d]['extension'][0]:
+                continue
 
-        enc = y[d]['encoding']
-        comp = "X"
-        if re.match('^zc', ext) or re.match('^c', ext):
-            enc = enc[16:]
-            comp = "c"
+            ext = y[d]['extension'][0] # XXX
+            ext = re.sub(r'^rv64_', '', ext)
+            ext = re.sub(r'^rv_', '', ext)
+            insn = d.replace("_", ".")
 
-        enc = enc.replace('-', '1')
+            enc = y[d]['encoding']
+            comp = "X"
+            if re.match('^zc', ext) or re.match('^c', ext):
+                enc = enc[16:]
+                comp = "c"
 
-        with open(f"{args.output}/{ext}_{insn}.c", "w") as f:
+            enc = enc.replace('-', '1')
+
             f.write(cprog.render(ext=ext, insn=insn, comp=comp, full_insn=hex(int(enc, 2))))
-            f.close()
+        f.write(bottom)
+        f.close()
 
     print("Now build with:")
-    print(f"$ for i in {args.output}/*.c; do clang-17 --target=riscv64-linux-gnu ./$i -o $i.runme; done")
+    print(f"$ clang-18 --target=riscv64-linux-gnu {args.output} -o {args.output}.runme")
 
 if __name__ == "__main__":
     main()
