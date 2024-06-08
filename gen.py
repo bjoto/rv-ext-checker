@@ -34,37 +34,61 @@ def main():
     y = yaml.safe_load(input_file)
 
     top =  """
+#include <string.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/ucontext.h>
 
 static const char *curr;
+static int curr_len;
 
-static void sighandler(int sig)
+static void sighandler(int sig, siginfo_t *info, void *context)
 {
-        if (sig == SIGILL) {
-                printf("%s sigill", curr);
-                exit(1);
-        }
+        ucontext_t *uctx = context;
 
-        printf("%s sig:%d ok\\n", curr, sig);
-        exit(0);
+        if (sig == SIGILL)
+                printf("%s sigill\\n", curr);
+        else
+                printf("%s sig:%d ok\\n", curr, sig);
+        uctx->uc_mcontext.__gregs[0] += curr_len;
+}
+
+typedef void (*sighandler_fn)(int, siginfo_t *, void *);
+
+static int install_sigaction(int signum, sighandler_fn handler)
+{
+        int ret;
+        struct sigaction sa;
+
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_sigaction = handler;
+        sa.sa_flags = SA_RESTART | SA_SIGINFO;
+        sigemptyset(&sa.sa_mask);
+        ret = sigaction(signum, &sa, NULL);
+        return ret;
 }
 
 int main()
 {
-        if (signal(SIGILL, sighandler) == SIG_ERR)
+        if (install_sigaction(SIGILL, sighandler))
                 exit(2);
-        if (signal(SIGSEGV, sighandler) == SIG_ERR)
+        if (install_sigaction(SIGSEGV, sighandler))
                 exit(2);
-        if (signal(SIGBUS, sighandler) == SIG_ERR)
+        if (install_sigaction(SIGBUS, sighandler))
                 exit(2);
     """
 
     cprog = jinja2.Template(
     """
         curr = "{{ ext }} {{ insn }}";
-        asm volatile (
+    {% if comp == "c" %}
+        curr_len = 2;
+    {% else %}
+        curr_len = 4;
+    {% endif %}
+
+    asm volatile (
     {% if comp == "c" %}
                 ".2byte {{ full_insn }}\\n\\t"
     {% else %}
